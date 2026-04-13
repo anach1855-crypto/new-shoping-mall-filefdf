@@ -1,0 +1,60 @@
+import { Plus } from 'lucide-react';
+import { motion } from 'motion/react';
+import { Product } from '../types';
+
+interface ProductCardProps {
+  product: Product;
+  onClick?: (product: Product) => void;
+  onAddToCart?: (product: Product) => void;
+  key?: string;
+}
+
+export default function ProductCard({ product, onClick, onAddToCart }: ProductCardProps) {
+  return (
+    <motion.div
+      initial={{ opacity: 0, scale: 0.9 }}
+      animate={{ opacity: 1, scale: 1 }}
+      whileHover={{ y: -5 }}
+      onClick={() => onClick?.(product)}
+      className="bg-white rounded-[32px] overflow-hidden shadow-sm hover:shadow-md transition-shadow group cursor-pointer"
+    >
+      <div className="relative aspect-square p-2">
+        <div className="relative w-full h-full rounded-[24px] overflow-hidden bg-[#fff0f3]">
+          <img
+            src={product.image}
+            alt={product.name}
+            className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500 sharp-image"
+            referrerPolicy="no-referrer"
+            loading="lazy"
+          />
+          
+          {product.isNew && (
+            <div className="absolute top-3 left-3 bg-white/20 backdrop-blur-sm px-3 py-1 rounded-full">
+              <span className="text-white text-[10px] font-bold uppercase tracking-widest">
+                New
+              </span>
+            </div>
+          )}
+        </div>
+      </div>
+
+      <div className="px-5 pb-5 pt-1 space-y-0.5 relative">
+        <h3 className="text-[15px] font-bold text-[#333] line-clamp-1">
+          {product.name}
+        </h3>
+        <div className="flex items-center justify-between">
+          <span className="text-[16px] font-bold text-[#e91e63]">${product.price}</span>
+          <button 
+            onClick={(e) => {
+              e.stopPropagation();
+              onAddToCart?.(product);
+            }}
+            className="w-8 h-8 bg-[#e91e63] text-white rounded-full flex items-center justify-center shadow-md hover:scale-110 transition-transform active:scale-95"
+          >
+            <Plus size={16} strokeWidth={3} />
+          </button>
+        </div>
+      </div>
+    </motion.div>
+  );
+}

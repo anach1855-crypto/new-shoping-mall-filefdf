@@ -1,0 +1,961 @@
+/**
+ * @license
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
+import { useState, ChangeEvent, useEffect } from 'react';
+import { motion, AnimatePresence } from 'motion/react';
+import { ShoppingBag, User, ShoppingCart, Heart, Gift, MapPin, Settings, LogOut, CheckCircle2, Coins, Plus, Trash2, Edit2, Save, X, Image as ImageIcon, MessageCircle, ArrowLeft } from 'lucide-react';
+import { collection, onSnapshot, doc, setDoc, deleteDoc, query, orderBy, addDoc, serverTimestamp, writeBatch, deleteField, getDocs } from 'firebase/firestore';
+import { db } from './firebase';
+import Header from './components/Header';
+import ProductCard from './components/ProductCard';
+import ProductDetails from './components/ProductDetails';
+import AuthPage from './components/AuthPage';
+import BottomNav from './components/BottomNav';
+import { PRODUCTS } from './constants';
+import { Category, Product } from './types';
+
+export default function App() {
+  const [activeCategory, setActiveCategory] = useState<Category>('For You');
+  const [activePage, setActivePage] = useState('Home');
+  const [selectedProduct, setSelectedProduct] = useState<Product | null>(null);
+  const [user, setUser] = useState<any>(null);
+  const [showSettingsLock, setShowSettingsLock] = useState(false);
+  const [settingsPassInput, setSettingsPassInput] = useState('');
+  const [isSettingsUnlocked, setIsSettingsUnlocked] = useState(false);
+  const [products, setProducts] = useState<Product[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
+  const [editingProduct, setEditingProduct] = useState<Product | null>(null);
+  const [isAddingProduct, setIsAddingProduct] = useState(false);
+  const [isProcessingImage, setIsProcessingImage] = useState(false);
+  const [isSaving, setIsSaving] = useState(false);
+  const [newProduct, setNewProduct] = useState<Partial<Product>>({
+    name: '',
+    price: 0,
+    category: 'Men',
+    image: '',
+    description: ''
+  });
+
+  useEffect(() => {
+    const qProducts = query(collection(db, 'products'), orderBy('createdAt', 'desc'));
+
+    const unsubProducts = onSnapshot(qProducts, (snapshot) => {
+      const productsList = snapshot.docs.map(doc => ({ ...doc.data(), id: doc.id })) as Product[];
+      setProducts(productsList);
+      setIsLoading(false);
+    }, (error) => {
+      console.error("Firestore products error:", error);
+      setIsLoading(false);
+    });
+
+    return () => unsubProducts();
+  }, []);
+
+  const handleSeedDatabase = async () => {
+    if (products.length > 0) {
+      if (!confirm('This will add default products. Continue?')) return;
+    }
+    
+    setIsSaving(true);
+    try {
+      for (const p of PRODUCTS) {
+        await setDoc(doc(db, 'products', p.id), { 
+          ...p, 
+          createdAt: serverTimestamp(),
+          updatedAt: serverTimestamp()
+        });
+      }
+      alert('Default products restored!');
+    } catch (err) {
+      console.error("Seeding failed:", err);
+      alert('Failed to restore products.');
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  const [searchQuery, setSearchQuery] = useState('');
+  const [priceRange, setPriceRange] = useState<[number, number]>([0, 10000]);
+  const [minRating, setMinRating] = useState<number>(0);
+
+  const filteredProducts = products.filter(p => {
+    const matchesCategory = activeCategory === 'For You' || p.category === activeCategory;
+    const matchesSearch = p.name.toLowerCase().includes(searchQuery.toLowerCase()) || 
+                         p.category.toLowerCase().includes(searchQuery.toLowerCase());
+    const matchesPrice = p.price >= priceRange[0] && p.price <= priceRange[1];
+    const matchesRating = p.rating >= minRating;
+    return matchesCategory && matchesSearch && matchesPrice && matchesRating;
+  });
+
+  const handleUpdateProduct = async (updatedProduct: Product) => {
+    if (!updatedProduct.image) {
+      alert('Product image is required');
+      return;
+    }
+
+    try {
+      setIsSaving(true);
+      const productRef = doc(db, 'products', updatedProduct.id);
+      
+      const dataToSave = {
+        name: updatedProduct.name.trim(),
+        price: Number(updatedProduct.price),
+        category: updatedProduct.category,
+        image: updatedProduct.image,
+        description: (updatedProduct.description || '').trim(),
+        updatedAt: serverTimestamp(),
+        // Preserve these if they exist
+        rating: updatedProduct.rating || 5.0,
+        reviews: updatedProduct.reviews || 0,
+        deliveryTime: updatedProduct.deliveryTime || '2-3 Days'
+      };
+      
+      await setDoc(productRef, dataToSave, { merge: true });
+      setEditingProduct(null);
+    } catch (error) {
+      console.error('Update failed:', error);
+      alert('Failed to save changes. Please try again.');
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  const handleAddProduct = async () => {
+    if (!newProduct.name || !newProduct.price || !newProduct.image) {
+      alert('Name, price, and image are all required');
+      return;
+    }
+    
+    try {
+      setIsSaving(true);
+      const productsRef = collection(db, 'products');
+      const newDocRef = doc(productsRef);
+      
+      const productData = {
+        id: newDocRef.id,
+        name: newProduct.name.trim(),
+        price: Number(newProduct.price),
+        category: newProduct.category,
+        image: newProduct.image,
+        description: (newProduct.description || '').trim(),
+        rating: 5.0,
+        reviews: 0,
+        deliveryTime: '2-3 Days',
+        createdAt: serverTimestamp(),
+        updatedAt: serverTimestamp()
+      };
+      
+      await setDoc(newDocRef, productData);
+
+      setIsAddingProduct(false);
+      setNewProduct({
+        name: '',
+        price: 0,
+        category: 'Men',
+        image: 'https://picsum.photos/seed/new/400/500',
+        rating: 5.0,
+        reviews: 0,
+        description: '',
+        deliveryTime: '2-3 Days'
+      });
+    } catch (error) {
+      console.error('Add failed:', error);
+      alert('Failed to add product. Please try again.');
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  const handleDeleteProduct = async (id: string) => {
+    if (confirm('Are you sure you want to delete this product?')) {
+      try {
+        await deleteDoc(doc(db, 'products', id));
+      } catch (error) {
+        alert('Error deleting product: ' + (error as Error).message);
+      }
+    }
+  };
+
+  const handleDeleteAllProducts = async () => {
+    if (products.length === 0) {
+      alert('No products to delete.');
+      return;
+    }
+
+    if (confirm('WARNING: This will delete ALL products from your store. This action cannot be undone. Are you sure?')) {
+      setIsSaving(true);
+      try {
+        const batch = writeBatch(db);
+        products.forEach(product => {
+          batch.delete(doc(db, 'products', product.id));
+        });
+        await batch.commit();
+        alert('All products have been deleted.');
+      } catch (error) {
+        console.error('Delete all failed:', error);
+        alert('Failed to delete all products.');
+      } finally {
+        setIsSaving(false);
+      }
+    }
+  };
+
+  const handleImageUpload = (e: ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    if (!file.type.startsWith('image/')) {
+      alert('Please select a valid image file.');
+      return;
+    }
+
+    setIsProcessingImage(true);
+    
+    const img = new Image();
+    const objectUrl = URL.createObjectURL(file);
+    
+    img.onerror = () => {
+      alert('Failed to load image.');
+      setIsProcessingImage(false);
+      URL.revokeObjectURL(objectUrl);
+    };
+
+    img.onload = () => {
+      try {
+        const canvas = document.createElement('canvas');
+        const MAX_WIDTH = 600;
+        const MAX_HEIGHT = 600;
+        let width = img.width;
+        let height = img.height;
+
+        if (width > height) {
+          if (width > MAX_WIDTH) {
+            height *= MAX_WIDTH / width;
+            width = MAX_WIDTH;
+          }
+        } else {
+          if (height > MAX_HEIGHT) {
+            width *= MAX_HEIGHT / height;
+            height = MAX_HEIGHT;
+          }
+        }
+
+        canvas.width = width;
+        canvas.height = height;
+        const ctx = canvas.getContext('2d');
+        if (!ctx) throw new Error('Canvas context failed');
+
+        ctx.imageSmoothingEnabled = true;
+        ctx.imageSmoothingQuality = 'high';
+        ctx.drawImage(img, 0, 0, width, height);
+        
+        const compressedBase64 = canvas.toDataURL('image/jpeg', 0.5);
+        
+        if (isAddingProduct) {
+          setNewProduct(prev => ({ ...prev, image: compressedBase64 }));
+        } else if (editingProduct) {
+          setEditingProduct(prev => prev ? ({ ...prev, image: compressedBase64 }) : null);
+        }
+        
+        setIsProcessingImage(false);
+        URL.revokeObjectURL(objectUrl);
+      } catch (err) {
+        console.error('Processing error:', err);
+        alert('Error processing image.');
+        setIsProcessingImage(false);
+        URL.revokeObjectURL(objectUrl);
+      }
+    };
+    
+    img.src = objectUrl;
+  };
+
+  const handleProductClick = (product: Product) => {
+    setSelectedProduct(product);
+    setActivePage('ProductDetails');
+  };
+
+  const handleAddToCart = (product: Product, quantity: number) => {
+    console.log(`Added ${quantity} of ${product.name} to cart`);
+    // Implement cart logic here if needed
+    setActivePage('Cart');
+  };
+
+  const handleAuthSuccess = (userData: any) => {
+    setUser(userData);
+    setActivePage('Profile');
+  };
+
+  const renderContent = () => {
+    if (activePage === 'ProductDetails' && selectedProduct) {
+      return (
+        <ProductDetails 
+          product={selectedProduct} 
+          onBack={() => setActivePage('Home')}
+          onAddToCart={handleAddToCart}
+        />
+      );
+    }
+
+    switch (activePage) {
+      case 'AdminPanel':
+        return (
+          <div className="max-w-5xl mx-auto pb-24">
+            {/* Admin Header */}
+            <div className="flex flex-col md:flex-row md:items-center justify-between gap-6 mb-10 bg-white p-8 rounded-[40px] shadow-sm border border-gray-50">
+              <div>
+                <h2 className="text-4xl font-black text-gray-900 tracking-tight mb-1">Admin Panel</h2>
+                <p className="text-gray-500 font-medium">Manage your store's products and inventory</p>
+              </div>
+              <div className="flex items-center gap-3">
+                <button 
+                  onClick={handleDeleteAllProducts}
+                  disabled={isSaving || products.length === 0}
+                  className="flex items-center gap-2 px-6 py-4 bg-red-50 text-red-600 rounded-2xl font-bold hover:bg-red-100 transition-all active:scale-95 disabled:opacity-50"
+                >
+                  <Trash2 size={20} />
+                  <span>Delete All</span>
+                </button>
+                <button 
+                  onClick={handleSeedDatabase}
+                  disabled={isSaving}
+                  className="flex items-center gap-2 px-6 py-4 bg-gray-50 text-gray-600 rounded-2xl font-bold hover:bg-gray-100 transition-all active:scale-95 disabled:opacity-50"
+                >
+                  <Plus size={20} />
+                  <span>Restore Defaults</span>
+                </button>
+                <button 
+                  onClick={() => setIsAddingProduct(true)}
+                  className="flex items-center gap-2 px-8 py-4 bg-[#e91e63] text-white rounded-2xl font-black shadow-xl shadow-pink-100 hover:bg-[#d81b60] transition-all active:scale-95"
+                >
+                  <Plus size={20} />
+                  <span>Add New Product</span>
+                </button>
+              </div>
+            </div>
+
+            {/* Product Grid */}
+            <div className="grid grid-cols-1 gap-4">
+              {products.map(product => (
+                <motion.div 
+                  layout
+                  key={product.id} 
+                  className="group bg-white p-5 rounded-[32px] shadow-sm border border-gray-50 hover:border-pink-100 hover:shadow-md transition-all flex flex-col sm:flex-row items-center gap-6"
+                >
+                  <div className="w-28 h-28 rounded-[24px] overflow-hidden bg-gray-50 flex-shrink-0 border-4 border-white shadow-sm">
+                    <img 
+                      src={product.image} 
+                      alt={product.name} 
+                      className="w-full h-full object-cover" 
+                      referrerPolicy="no-referrer" 
+                    />
+                  </div>
+                  
+                  <div className="flex-1 min-w-0 text-center sm:text-left">
+                    <div className="flex flex-wrap items-center justify-center sm:justify-start gap-2 mb-1">
+                      <h3 className="text-xl font-black text-gray-900 truncate">{product.name}</h3>
+                      <span className="px-3 py-1 bg-pink-50 text-[#e91e63] text-[10px] font-black uppercase tracking-wider rounded-full">
+                        {product.category}
+                      </span>
+                    </div>
+                    <div className="flex items-center justify-center sm:justify-start gap-3 mb-2">
+                      <span className="text-2xl font-black text-[#e91e63]">${product.price}</span>
+                      <div className="h-4 w-[1px] bg-gray-200" />
+                      <span className="text-sm font-bold text-gray-400">ID: {product.id.slice(0, 8)}...</span>
+                    </div>
+                    <p className="text-gray-500 text-sm font-medium line-clamp-1 max-w-md">
+                      {product.description || 'No description provided.'}
+                    </p>
+                  </div>
+
+                  <div className="flex items-center gap-2 sm:ml-auto">
+                    <button 
+                      onClick={() => setEditingProduct(product)}
+                      className="p-4 bg-gray-50 text-gray-600 rounded-2xl hover:bg-pink-50 hover:text-[#e91e63] transition-all active:scale-90"
+                      title="Edit Product"
+                    >
+                      <Edit2 size={22} />
+                    </button>
+                    <button 
+                      onClick={() => handleDeleteProduct(product.id)}
+                      className="p-4 bg-red-50 text-red-500 rounded-2xl hover:bg-red-100 transition-all active:scale-90"
+                      title="Delete Product"
+                    >
+                      <Trash2 size={22} />
+                    </button>
+                  </div>
+                </motion.div>
+              ))}
+              
+              {products.length === 0 && !isLoading && (
+                <div className="text-center py-20 bg-white rounded-[40px] border-2 border-dashed border-gray-100">
+                  <ShoppingBag size={48} className="mx-auto text-gray-200 mb-4" />
+                  <p className="text-gray-400 font-bold text-xl">No products found.</p>
+                  <button 
+                    onClick={handleSeedDatabase}
+                    className="mt-4 text-[#e91e63] font-black hover:underline"
+                  >
+                    Click here to restore default products
+                  </button>
+                </div>
+              )}
+            </div>
+
+            {/* Product Form Modal */}
+            <AnimatePresence>
+              {(editingProduct || isAddingProduct) && (
+                <motion.div 
+                  initial={{ opacity: 0 }}
+                  animate={{ opacity: 1 }}
+                  exit={{ opacity: 0 }}
+                  className="fixed inset-0 z-[110] flex items-center justify-center p-4 sm:p-6 bg-black/60 backdrop-blur-md overflow-y-auto"
+                >
+                  <motion.div 
+                    initial={{ scale: 0.9, y: 20, opacity: 0 }}
+                    animate={{ scale: 1, y: 0, opacity: 1 }}
+                    exit={{ scale: 0.9, y: 20, opacity: 0 }}
+                    className="bg-white rounded-[48px] p-8 sm:p-10 w-full max-w-3xl shadow-2xl my-auto relative"
+                  >
+                    <button 
+                      onClick={() => {
+                        setEditingProduct(null);
+                        setIsAddingProduct(false);
+                      }}
+                      className="absolute top-8 right-8 p-2 text-gray-400 hover:text-gray-600 hover:bg-gray-50 rounded-full transition-all"
+                    >
+                      <X size={28} />
+                    </button>
+
+                    <div className="mb-10">
+                      <h3 className="text-3xl font-black text-gray-900 mb-2">
+                        {isAddingProduct ? 'Add New Product' : 'Edit Product Details'}
+                      </h3>
+                      <p className="text-gray-500 font-medium">Fill in the information below to update your store.</p>
+                    </div>
+
+                    <div className="grid grid-cols-1 lg:grid-cols-2 gap-10">
+                      {/* Left Column: Details */}
+                      <div className="space-y-6">
+                        <div className="space-y-2">
+                          <label className="text-[10px] font-black text-gray-400 uppercase tracking-[0.2em] ml-1">Product Name</label>
+                          <input 
+                            type="text"
+                            placeholder="Enter product name"
+                            className="w-full p-5 bg-gray-50 rounded-3xl outline-none border-2 border-transparent focus:border-[#e91e63] focus:bg-white transition-all font-bold text-gray-900"
+                            value={isAddingProduct ? newProduct.name : editingProduct?.name}
+                            onChange={(e) => isAddingProduct ? setNewProduct({...newProduct, name: e.target.value}) : setEditingProduct({...editingProduct!, name: e.target.value})}
+                          />
+                        </div>
+
+                        <div className="grid grid-cols-2 gap-4">
+                          <div className="space-y-2">
+                            <label className="text-[10px] font-black text-gray-400 uppercase tracking-[0.2em] ml-1">Price ($)</label>
+                            <input 
+                              type="number"
+                              placeholder="0.00"
+                              className="w-full p-5 bg-gray-50 rounded-3xl outline-none border-2 border-transparent focus:border-[#e91e63] focus:bg-white transition-all font-bold text-gray-900"
+                              value={isAddingProduct ? newProduct.price : editingProduct?.price}
+                              onChange={(e) => isAddingProduct ? setNewProduct({...newProduct, price: Number(e.target.value)}) : setEditingProduct({...editingProduct!, price: Number(e.target.value)})}
+                            />
+                          </div>
+                          <div className="space-y-2">
+                            <label className="text-[10px] font-black text-gray-400 uppercase tracking-[0.2em] ml-1">Category</label>
+                            <select 
+                              className="w-full p-5 bg-gray-50 rounded-3xl outline-none border-2 border-transparent focus:border-[#e91e63] focus:bg-white transition-all font-bold text-gray-900 appearance-none cursor-pointer"
+                              value={isAddingProduct ? newProduct.category : editingProduct?.category}
+                              onChange={(e) => isAddingProduct ? setNewProduct({...newProduct, category: e.target.value as Category}) : setEditingProduct({...editingProduct!, category: e.target.value as Category})}
+                            >
+                              <option value="Men">Men</option>
+                              <option value="Women">Women</option>
+                              <option value="Kids">Kids</option>
+                              <option value="For You">For You</option>
+                            </select>
+                          </div>
+                        </div>
+
+                        <div className="space-y-2">
+                          <label className="text-[10px] font-black text-gray-400 uppercase tracking-[0.2em] ml-1">Description</label>
+                          <textarea 
+                            rows={4}
+                            placeholder="Describe your product..."
+                            className="w-full p-5 bg-gray-50 rounded-3xl outline-none border-2 border-transparent focus:border-[#e91e63] focus:bg-white transition-all font-medium text-gray-700 resize-none"
+                            value={isAddingProduct ? newProduct.description : editingProduct?.description}
+                            onChange={(e) => isAddingProduct ? setNewProduct({...newProduct, description: e.target.value}) : setEditingProduct({...editingProduct!, description: e.target.value})}
+                          />
+                        </div>
+                      </div>
+
+                      {/* Right Column: Image */}
+                      <div className="space-y-6">
+                        <div className="space-y-2">
+                          <label className="text-[10px] font-black text-gray-400 uppercase tracking-[0.2em] ml-1">Product Image</label>
+                          <div className="relative group aspect-square rounded-[40px] overflow-hidden bg-gray-50 border-4 border-white shadow-inner">
+                            <img 
+                              src={isAddingProduct ? newProduct.image : editingProduct?.image} 
+                              alt="Preview" 
+                              className="w-full h-full object-cover transition-transform duration-700 group-hover:scale-110" 
+                              referrerPolicy="no-referrer" 
+                            />
+                            
+                            <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center backdrop-blur-[2px]">
+                              <input 
+                                type="file"
+                                accept="image/*"
+                                onChange={(e) => {
+                                  handleImageUpload(e);
+                                  e.target.value = '';
+                                }}
+                                className="hidden"
+                                id="admin-image-upload"
+                              />
+                              <label 
+                                htmlFor="admin-image-upload"
+                                className="bg-white text-gray-900 px-6 py-3 rounded-2xl font-black text-sm cursor-pointer hover:scale-105 transition-transform active:scale-95"
+                              >
+                                Change Image
+                              </label>
+                            </div>
+
+                            {isProcessingImage && (
+                              <div className="absolute inset-0 bg-white/80 backdrop-blur-sm flex flex-col items-center justify-center gap-3">
+                                <div className="w-10 h-10 border-4 border-[#e91e63] border-t-transparent rounded-full animate-spin" />
+                                <span className="text-xs font-black text-[#e91e63] uppercase tracking-widest">Processing...</span>
+                              </div>
+                            )}
+                          </div>
+                        </div>
+
+                        <div className="space-y-2">
+                          <label className="text-[10px] font-black text-gray-400 uppercase tracking-[0.2em] ml-1">Image URL (Optional)</label>
+                          <input 
+                            type="text"
+                            placeholder="Or paste image URL here"
+                            className="w-full p-4 bg-gray-50 rounded-2xl outline-none border-2 border-transparent focus:border-[#e91e63] focus:bg-white transition-all font-bold text-xs text-gray-500"
+                            value={isAddingProduct ? newProduct.image : editingProduct?.image}
+                            onChange={(e) => isAddingProduct ? setNewProduct({...newProduct, image: e.target.value}) : setEditingProduct({...editingProduct!, image: e.target.value})}
+                          />
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="mt-12 flex flex-col sm:flex-row gap-4">
+                      <button 
+                        onClick={() => {
+                          setEditingProduct(null);
+                          setIsAddingProduct(false);
+                        }}
+                        className="flex-1 py-5 rounded-3xl font-black text-gray-400 hover:bg-gray-50 transition-all active:scale-95"
+                      >
+                        Cancel
+                      </button>
+                      <button 
+                        onClick={() => isAddingProduct ? handleAddProduct() : editingProduct && handleUpdateProduct(editingProduct)}
+                        disabled={isSaving || isProcessingImage}
+                        className="flex-[2] bg-[#e91e63] text-white py-5 rounded-3xl font-black text-xl shadow-2xl shadow-pink-200 hover:bg-[#d81b60] transition-all active:scale-95 disabled:opacity-50 flex items-center justify-center gap-3"
+                      >
+                        {isSaving ? (
+                          <>
+                            <div className="w-6 h-6 border-4 border-white border-t-transparent rounded-full animate-spin" />
+                            <span>Saving...</span>
+                          </>
+                        ) : (
+                          <>
+                            <Save size={24} />
+                            <span>{isAddingProduct ? 'Add Product' : 'Save Changes'}</span>
+                          </>
+                        )}
+                      </button>
+                    </div>
+                  </motion.div>
+                </motion.div>
+              )}
+            </AnimatePresence>
+          </div>
+        );
+      case 'Category':
+        return (
+          <div className="flex flex-col items-center justify-center py-20 text-center">
+            <h2 className="text-3xl font-black text-gray-900 mb-4">Categories</h2>
+            <div className="grid grid-cols-2 gap-4 w-full max-w-md">
+              {['Men', 'Women', 'Kids', 'Accessories'].map(cat => (
+                <div key={cat} className="bg-white p-8 rounded-3xl shadow-sm border border-gray-100 font-bold text-gray-800 hover:border-[#e91e63] transition-colors cursor-pointer">
+                  {cat}
+                </div>
+              ))}
+            </div>
+          </div>
+        );
+      case 'Cart':
+        return (
+          <div className="flex flex-col items-center justify-center py-20 text-center">
+            <ShoppingBag size={64} className="text-gray-300 mb-4" />
+            <h2 className="text-3xl font-black text-gray-900 mb-2">Your Bag is Empty</h2>
+            <p className="text-gray-500 mb-8">Looks like you haven't added anything to your bag yet.</p>
+            <button onClick={() => setActivePage('Home')} className="bg-[#e91e63] text-white px-8 py-3 rounded-full font-bold shadow-lg">
+              Start Shopping
+            </button>
+          </div>
+        );
+      case 'Chat':
+        return (
+          <div className="flex flex-col items-center justify-center py-20 text-center px-6">
+            <div className="w-24 h-24 bg-green-100 text-green-600 rounded-full flex items-center justify-center mb-6">
+              <MessageCircle size={48} />
+            </div>
+            <h2 className="text-3xl font-black text-gray-900 mb-4">Chat with Us</h2>
+            <p className="text-gray-500 mb-8 max-w-xs">Have questions? Click the button below to message us directly on WhatsApp.</p>
+            <button 
+              onClick={() => window.open('https://wa.me/8801825953305', '_blank')}
+              className="bg-[#25D366] text-white px-10 py-4 rounded-2xl font-black shadow-xl shadow-green-100 flex items-center gap-3 hover:scale-105 transition-transform active:scale-95"
+            >
+              <MessageCircle size={24} />
+              Open WhatsApp
+            </button>
+          </div>
+        );
+      case 'Orders':
+        return (
+          <div className="max-w-md mx-auto px-6 py-10">
+            <button onClick={() => setActivePage('Profile')} className="mb-8 flex items-center gap-2 text-gray-500 font-bold">
+              <ArrowLeft size={20} /> Back
+            </button>
+            <div className="text-center py-20">
+              <div className="w-24 h-24 bg-gray-100 rounded-full flex items-center justify-center mx-auto mb-6">
+                <ShoppingCart size={40} className="text-gray-300" />
+              </div>
+              <h2 className="text-3xl font-black text-gray-900 mb-2">No Orders Yet</h2>
+              <p className="text-gray-500 mb-8">You haven't placed any orders yet. Start shopping to see your orders here!</p>
+              <button onClick={() => setActivePage('Home')} className="bg-[#e91e63] text-white px-8 py-4 rounded-2xl font-black shadow-xl shadow-pink-100">
+                Browse Products
+              </button>
+            </div>
+          </div>
+        );
+      case 'Wishlist':
+        return (
+          <div className="max-w-md mx-auto px-6 py-10">
+            <button onClick={() => setActivePage('Profile')} className="mb-8 flex items-center gap-2 text-gray-500 font-bold">
+              <ArrowLeft size={20} /> Back
+            </button>
+            <div className="text-center py-20">
+              <div className="w-24 h-24 bg-pink-50 rounded-full flex items-center justify-center mx-auto mb-6">
+                <Heart size={40} className="text-pink-200" />
+              </div>
+              <h2 className="text-3xl font-black text-gray-900 mb-2">Wishlist is Empty</h2>
+              <p className="text-gray-500 mb-8">Save items you love to your wishlist and they'll appear here.</p>
+              <button onClick={() => setActivePage('Home')} className="bg-[#e91e63] text-white px-8 py-4 rounded-2xl font-black shadow-xl shadow-pink-100">
+                Explore Trends
+              </button>
+            </div>
+          </div>
+        );
+      case 'Vouchers':
+        return (
+          <div className="max-w-md mx-auto px-6 py-10">
+            <button onClick={() => setActivePage('Profile')} className="mb-8 flex items-center gap-2 text-gray-500 font-bold">
+              <ArrowLeft size={20} /> Back
+            </button>
+            <div className="space-y-4">
+              <h2 className="text-3xl font-black text-gray-900 mb-6">My Vouchers</h2>
+              <div className="bg-gradient-to-r from-[#e91e63] to-[#ff4081] p-6 rounded-[32px] text-white relative overflow-hidden">
+                <div className="relative z-10">
+                  <p className="text-xs font-black uppercase tracking-widest opacity-80 mb-1">Welcome Gift</p>
+                  <h3 className="text-2xl font-black mb-4">10% OFF</h3>
+                  <div className="bg-white/20 backdrop-blur-md rounded-xl p-3 flex justify-between items-center border border-white/30">
+                    <span className="font-mono font-bold tracking-wider">WELCOME10</span>
+                    <button className="bg-white text-[#e91e63] px-4 py-1.5 rounded-lg font-black text-xs">COPY</button>
+                  </div>
+                </div>
+                <div className="absolute -right-8 -bottom-8 w-32 h-32 bg-white/10 rounded-full blur-2xl" />
+              </div>
+              <p className="text-center text-gray-400 text-sm font-bold pt-10">No more vouchers available</p>
+            </div>
+          </div>
+        );
+      case 'Addresses':
+        return (
+          <div className="max-w-md mx-auto px-6 py-10">
+            <button onClick={() => setActivePage('Profile')} className="mb-8 flex items-center gap-2 text-gray-500 font-bold">
+              <ArrowLeft size={20} /> Back
+            </button>
+            <h2 className="text-3xl font-black text-gray-900 mb-6">My Addresses</h2>
+            <div className="space-y-4">
+              <div className="p-6 bg-gray-50 rounded-[32px] border-2 border-dashed border-gray-200 flex flex-col items-center justify-center text-center py-12">
+                <MapPin size={32} className="text-gray-300 mb-4" />
+                <p className="text-gray-500 font-bold mb-4">No addresses saved yet</p>
+                <button className="text-[#e91e63] font-black uppercase tracking-widest text-xs">+ Add New Address</button>
+              </div>
+            </div>
+          </div>
+        );
+      case 'AccountInfo':
+        return (
+          <div className="max-w-md mx-auto px-6 py-10">
+            <button onClick={() => setActivePage('Profile')} className="mb-8 flex items-center gap-2 text-gray-500 font-bold">
+              <ArrowLeft size={20} /> Back
+            </button>
+            <h2 className="text-3xl font-black text-gray-900 mb-8">Account Info</h2>
+            <div className="space-y-6">
+              <div className="space-y-2">
+                <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest ml-4">Full Name</label>
+                <div className="p-5 bg-gray-50 rounded-2xl font-bold text-gray-900 border border-gray-100">
+                  {user?.name || 'Not set'}
+                </div>
+              </div>
+              <div className="space-y-2">
+                <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest ml-4">Email Address</label>
+                <div className="p-5 bg-gray-50 rounded-2xl font-bold text-gray-900 border border-gray-100">
+                  {user?.email || 'Not set'}
+                </div>
+              </div>
+              <div className="space-y-2">
+                <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest ml-4">Phone Number</label>
+                <div className="p-5 bg-gray-50 rounded-2xl font-bold text-gray-400 border border-gray-100 italic">
+                  Not provided
+                </div>
+              </div>
+              <button className="w-full py-5 bg-gray-900 text-white rounded-3xl font-black text-lg shadow-xl shadow-gray-200 mt-10">
+                Edit Profile
+              </button>
+            </div>
+          </div>
+        );
+      case 'Profile':
+        if (!user) {
+          return (
+            <AuthPage 
+              onBack={() => setActivePage('Home')} 
+              onSuccess={handleAuthSuccess} 
+            />
+          );
+        }
+        return (
+          <div className="max-w-md mx-auto mt-4">
+            <div className="bg-white rounded-[40px] p-8 shadow-sm border border-gray-50">
+              {/* Profile Header */}
+              <div className="flex items-center gap-4 mb-10">
+                <div className="w-20 h-20 bg-[#fff0f3] rounded-full flex items-center justify-center border-4 border-white shadow-sm">
+                  <User size={40} className="text-[#e91e63]" />
+                </div>
+                <div className="flex flex-col gap-1">
+                  <div className="flex items-center gap-1.5">
+                    <h2 className="text-xl font-black text-gray-900 italic">{user.name || 'Name not set'}</h2>
+                    <CheckCircle2 size={18} className="text-blue-500 fill-blue-500 text-white" />
+                  </div>
+                  <div className="flex items-center gap-1.5 px-3 py-1 bg-white border-2 border-[#e91e63] rounded-full w-fit">
+                    <Coins size={14} className="text-[#e91e63]" />
+                    <span className="text-xs font-black text-[#e91e63]">0 Point</span>
+                  </div>
+                </div>
+              </div>
+
+              {/* Menu List */}
+              <div className="space-y-6 mb-10">
+                <button 
+                  onClick={() => setActivePage('Orders')}
+                  className="flex items-center gap-4 w-full group"
+                >
+                  <ShoppingCart size={24} className="text-gray-900" />
+                  <span className="text-xl font-bold text-gray-900">My Orders</span>
+                </button>
+                <button 
+                  onClick={() => setActivePage('Wishlist')}
+                  className="flex items-center gap-4 w-full group"
+                >
+                  <Heart size={24} className="text-gray-900" />
+                  <span className="text-xl font-bold text-gray-900">My Wishlist</span>
+                </button>
+                <button 
+                  onClick={() => setActivePage('Vouchers')}
+                  className="flex items-center gap-4 w-full group"
+                >
+                  <Gift size={24} className="text-gray-900" />
+                  <span className="text-xl font-bold text-gray-900">Vouchers</span>
+                </button>
+                <button 
+                  onClick={() => setActivePage('Addresses')}
+                  className="flex items-center gap-4 w-full group"
+                >
+                  <MapPin size={24} className="text-gray-900" />
+                  <span className="text-xl font-bold text-gray-900">My Addresses</span>
+                </button>
+                <button 
+                  onClick={() => setActivePage('AccountInfo')}
+                  className="flex items-center gap-4 w-full group"
+                >
+                  <User size={24} className="text-gray-900" />
+                  <span className="text-xl font-bold text-gray-900">Account Information</span>
+                </button>
+                <button 
+                  onClick={() => {
+                    if (!isSettingsUnlocked) {
+                      setShowSettingsLock(true);
+                    } else {
+                      setActivePage('AdminPanel');
+                    }
+                  }}
+                  className="flex items-center gap-4 w-full group"
+                >
+                  <Settings size={24} className="text-gray-900" />
+                  <span className="text-xl font-bold text-gray-900">Settings</span>
+                </button>
+              </div>
+
+              {/* Settings Password Modal */}
+              <AnimatePresence>
+                {showSettingsLock && (
+                  <motion.div 
+                    initial={{ opacity: 0 }}
+                    animate={{ opacity: 1 }}
+                    exit={{ opacity: 0 }}
+                    className="fixed inset-0 z-[100] flex items-center justify-center p-6 bg-black/40 backdrop-blur-sm"
+                  >
+                    <motion.div 
+                      initial={{ scale: 0.9, opacity: 0 }}
+                      animate={{ scale: 1, opacity: 1 }}
+                      exit={{ scale: 0.9, opacity: 0 }}
+                      className="bg-white rounded-[32px] p-8 w-full max-w-sm shadow-2xl"
+                    >
+                      <h3 className="text-2xl font-black text-gray-900 mb-2">Security Check</h3>
+                      <p className="text-gray-500 mb-6 font-medium">Please enter the security password to access settings.</p>
+                      
+                      <input
+                        type="password"
+                        autoFocus
+                        placeholder="Enter Password"
+                        className="w-full p-5 bg-gray-50 border-2 border-transparent focus:border-[#e91e63] focus:bg-white rounded-2xl outline-none transition-all font-bold text-gray-900 mb-4"
+                        value={settingsPassInput}
+                        onChange={(e) => setSettingsPassInput(e.target.value)}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter') {
+                            if (settingsPassInput === '53305') {
+                              setIsSettingsUnlocked(true);
+                              setShowSettingsLock(false);
+                              setSettingsPassInput('');
+                              setActivePage('AdminPanel');
+                            } else {
+                              alert("Incorrect Password!");
+                            }
+                          }
+                        }}
+                      />
+                      
+                      <div className="flex gap-3">
+                        <button 
+                          onClick={() => {
+                            setShowSettingsLock(false);
+                            setSettingsPassInput('');
+                          }}
+                          className="flex-1 py-4 rounded-2xl font-bold text-gray-400 hover:bg-gray-50 transition-colors"
+                        >
+                          Cancel
+                        </button>
+                        <button 
+                          onClick={() => {
+                            if (settingsPassInput === '53305') {
+                              setIsSettingsUnlocked(true);
+                              setShowSettingsLock(false);
+                              setSettingsPassInput('');
+                              setActivePage('AdminPanel');
+                            } else {
+                              alert("Incorrect Password!");
+                            }
+                          }}
+                          className="flex-1 bg-[#e91e63] text-white py-4 rounded-2xl font-black shadow-lg shadow-pink-100 hover:bg-[#d81b60] transition-all"
+                        >
+                          Unlock
+                        </button>
+                      </div>
+                    </motion.div>
+                  </motion.div>
+                )}
+              </AnimatePresence>
+
+              {/* Logout Button */}
+              <button 
+                onClick={() => setUser(null)}
+                className="flex items-center gap-3 text-[#e91e63] font-bold text-xl hover:opacity-80 transition-all"
+              >
+                <LogOut size={24} />
+                <span>Log Out</span>
+              </button>
+            </div>
+          </div>
+        );
+      default:
+        return (
+          <>
+            <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
+              <AnimatePresence>
+                {filteredProducts.map((product) => (
+                  <ProductCard 
+                    key={product.id} 
+                    product={product} 
+                    onClick={handleProductClick}
+                    onAddToCart={(p) => handleAddToCart(p, 1)}
+                  />
+                ))}
+              </AnimatePresence>
+            </div>
+
+            {filteredProducts.length === 0 && !isLoading && (
+              <div className="text-center py-20">
+                <p className="text-gray-400 font-medium">No products found in this category.</p>
+              </div>
+            )}
+
+            {/* Promotional Banner */}
+            {activePage === 'Home' && (
+              <motion.div
+                initial={{ opacity: 0, y: 20 }}
+                whileInView={{ opacity: 1, y: 0 }}
+                viewport={{ once: true }}
+                className="mt-12 bg-gradient-to-r from-pink-500 to-rose-600 rounded-[40px] p-8 text-white relative overflow-hidden"
+              >
+                <div className="relative z-10">
+                  <h3 className="text-3xl font-black mb-2">Eid Special Sale!</h3>
+                  <p className="text-pink-100 mb-6 max-w-xs">Get up to 50% off on all traditional wear. Limited time offer.</p>
+                  <button className="bg-white text-pink-600 px-8 py-3 rounded-full font-bold shadow-lg hover:bg-pink-50 transition-colors">
+                    Shop Now
+                  </button>
+                </div>
+                <div className="absolute right-[-20px] bottom-[-20px] opacity-20 rotate-12">
+                  <div className="w-64 h-64 bg-white rounded-full blur-3xl" />
+                </div>
+              </motion.div>
+            )}
+          </>
+        );
+    }
+  };
+
+  return (
+    <div className="min-h-screen bg-[#Faf2f8] pb-32">
+      {activePage !== 'ProductDetails' && activePage !== 'Profile' && (
+        <Header 
+          activeCategory={activeCategory} 
+          setActiveCategory={setActiveCategory}
+          searchQuery={searchQuery}
+          setSearchQuery={setSearchQuery}
+          priceRange={priceRange}
+          setPriceRange={setPriceRange}
+          minRating={minRating}
+          setMinRating={setMinRating}
+        />
+      )}
+
+      <main className={`max-w-7xl mx-auto px-6 ${activePage !== 'ProductDetails' && activePage !== 'Profile' ? 'mt-8' : ''}`}>
+        {isLoading ? (
+          <div className="flex items-center justify-center py-40">
+            <div className="w-12 h-12 border-4 border-[#e91e63] border-t-transparent rounded-full animate-spin"></div>
+          </div>
+        ) : renderContent()}
+      </main>
+
+      <BottomNav activePage={activePage} setActivePage={setActivePage} />
+    </div>
+  );
+}
+
