@@ -1,0 +1,10 @@
+export type Category = 'For You' | 'Men' | 'Women' | 'Kids' | 'Accessories';
+
+export interface Product {
+  id: string;
+  name: string;
+  price: number;
+  category: Category;
+  image: string;
+  isNew?: boolean;
+}

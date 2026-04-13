@@ -1,0 +1,165 @@
+import { Search, SlidersHorizontal, Star } from 'lucide-react';
+import { motion, AnimatePresence } from 'motion/react';
+import { useState } from 'react';
+import { Category } from '../types';
+
+interface HeaderProps {
+  activeCategory: Category;
+  setActiveCategory: (category: Category) => void;
+  searchQuery: string;
+  setSearchQuery: (query: string) => void;
+  priceRange: [number, number];
+  setPriceRange: (range: [number, number]) => void;
+  minRating: number;
+  setMinRating: (rating: number) => void;
+}
+
+export default function Header({ 
+  activeCategory, 
+  setActiveCategory,
+  searchQuery,
+  setSearchQuery,
+  priceRange,
+  setPriceRange,
+  minRating,
+  setMinRating
+}: HeaderProps) {
+  const [isExpanded, setIsExpanded] = useState(false);
+
+  const categories: Category[] = ['For You', 'Men', 'Women', 'Kids', 'Accessories'];
+
+  return (
+    <header className={`relative bg-[#e91e63] text-white transition-all duration-500 ease-in-out ${isExpanded ? 'h-auto py-10' : 'h-[200px] flex flex-col justify-center'} px-6 rounded-b-[40px] sm:rounded-b-[50px] shadow-2xl overflow-hidden z-20`}>
+      <div className="w-full max-w-2xl mx-auto text-center space-y-6 relative z-10">
+        {!isExpanded && (
+          <motion.div
+            initial={{ opacity: 0, y: -20 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.6, ease: "easeOut" }}
+            className="space-y-2"
+          >
+            <p className="text-[11px] uppercase tracking-[0.3em] font-semibold opacity-90">
+              BANGLADESH'S FAVORITE ONLINE
+            </p>
+            <h1 className="text-[28px] font-bold tracking-tight leading-none">
+              FASHION MALL
+            </h1>
+          </motion.div>
+        )}
+
+        <div className="space-y-4">
+          <div className="relative w-[90%] mx-auto h-[52px]">
+            <div className="absolute left-5 top-1/2 -translate-y-1/2 text-gray-400 z-10">
+              <Search size={15} />
+            </div>
+            <input
+              type="text"
+              placeholder="Search products..."
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              className="w-full h-full bg-white text-gray-800 pl-12 pr-32 rounded-[30px] shadow-xl focus:outline-none focus:ring-4 focus:ring-pink-300/50 transition-all text-[13px] placeholder:text-gray-400 font-medium"
+            />
+            <div className="absolute right-1.5 top-1/2 -translate-y-1/2 flex items-center gap-1">
+              <button 
+                onClick={() => setIsExpanded(!isExpanded)}
+                className={`p-2 rounded-full transition-all ${isExpanded ? 'bg-pink-100 text-[#e91e63]' : 'text-gray-400 hover:bg-gray-100'}`}
+              >
+                <SlidersHorizontal size={18} />
+              </button>
+              <button className="bg-[#e91e63] px-5 py-2 rounded-[25px] text-white text-[13px] font-bold hover:bg-pink-700 transition-all shadow-md active:scale-95">
+                Search
+              </button>
+            </div>
+          </div>
+
+          <AnimatePresence>
+            {isExpanded && (
+              <motion.div
+                initial={{ height: 0, opacity: 0 }}
+                animate={{ height: 'auto', opacity: 1 }}
+                exit={{ height: 0, opacity: 0 }}
+                className="overflow-hidden"
+              >
+                <div className="bg-white/10 backdrop-blur-md rounded-[30px] p-6 mt-4 space-y-6 text-left border border-white/20">
+                  <div className="space-y-3">
+                    <label className="text-[11px] font-black uppercase tracking-widest opacity-80">Category</label>
+                    <div className="flex flex-wrap gap-2">
+                      {categories.map((cat) => (
+                        <button
+                          key={cat}
+                          onClick={() => setActiveCategory(cat)}
+                          className={`px-4 py-2 rounded-full text-xs font-bold transition-all ${
+                            activeCategory === cat 
+                              ? 'bg-white text-[#e91e63] shadow-lg' 
+                              : 'bg-white/10 text-white hover:bg-white/20'
+                          }`}
+                        >
+                          {cat}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                    <div className="space-y-3">
+                      <label className="text-[11px] font-black uppercase tracking-widest opacity-80">Price Range (৳)</label>
+                      <div className="flex items-center gap-3">
+                        <input 
+                          type="number" 
+                          value={priceRange[0]}
+                          onChange={(e) => setPriceRange([Number(e.target.value), priceRange[1]])}
+                          className="w-full bg-white/10 border border-white/20 rounded-xl px-3 py-2 text-xs font-bold focus:outline-none focus:bg-white/20"
+                          placeholder="Min"
+                        />
+                        <span className="opacity-50">-</span>
+                        <input 
+                          type="number" 
+                          value={priceRange[1]}
+                          onChange={(e) => setPriceRange([priceRange[0], Number(e.target.value)])}
+                          className="w-full bg-white/10 border border-white/20 rounded-xl px-3 py-2 text-xs font-bold focus:outline-none focus:bg-white/20"
+                          placeholder="Max"
+                        />
+                      </div>
+                    </div>
+
+                    <div className="space-y-3">
+                      <label className="text-[11px] font-black uppercase tracking-widest opacity-80">Minimum Rating</label>
+                      <div className="flex items-center gap-2">
+                        {[1, 2, 3, 4, 5].map((star) => (
+                          <button
+                            key={star}
+                            onClick={() => setMinRating(star === minRating ? 0 : star)}
+                            className={`p-2 rounded-lg transition-all ${
+                              minRating >= star ? 'text-yellow-400' : 'text-white/30'
+                            }`}
+                          >
+                            <Star size={20} fill={minRating >= star ? 'currentColor' : 'none'} />
+                          </button>
+                        ))}
+                        <span className="text-xs font-bold ml-2 opacity-80">{minRating > 0 ? `${minRating}+ Stars` : 'Any Rating'}</span>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="pt-2 flex justify-end">
+                    <button 
+                      onClick={() => {
+                        setSearchQuery('');
+                        setPriceRange([0, 10000]);
+                        setMinRating(0);
+                        setActiveCategory('For You');
+                      }}
+                      className="text-[11px] font-bold uppercase tracking-wider opacity-60 hover:opacity-100 transition-opacity"
+                    >
+                      Reset Filters
+                    </button>
+                  </div>
+                </div>
+              </motion.div>
+            )}
+          </AnimatePresence>
+        </div>
+      </div>
+    </header>
+  );
+}
